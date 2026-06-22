@@ -1022,3 +1022,522 @@ sqlserver: ClusterIP
 Esto permite que solamente el frontend quede expuesto públicamente mediante un balanceador de carga de AWS, mientras que el backend y la base de datos quedan accesibles únicamente dentro del clúster.
 
 No se utilizarán anotaciones avanzadas ALB/NLB ni AWS Load Balancer Controller en esta etapa. Para mantener compatibilidad con las restricciones del entorno AWS Academy, el frontend se expondrá con un `Service type: LoadBalancer` simple.
+
+## 21. Publicación de imágenes Docker en Amazon ECR
+
+Para desplegar los servicios propios en EKS, se crearon dos repositorios en Amazon ECR:
+
+```text
+ddaa-frontend
+ddaa-service
+```
+
+Se validaron las URI reales de los repositorios:
+
+```text
+ddaa-frontend -> 409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-frontend
+ddaa-service  -> 409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-service
+```
+
+SQL Server no se publicó en ECR, ya que se utilizó la imagen oficial pública de Microsoft:
+
+```text
+mcr.microsoft.com/mssql/server:2022-latest
+```
+
+Las imágenes propias fueron construidas localmente y publicadas con el tag:
+
+```text
+eks-v1
+```
+
+Imágenes usadas en Kubernetes:
+
+```text
+409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-service:eks-v1
+409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-frontend:eks-v1
+```
+
+Los manifiestos Kubernetes fueron actualizados para utilizar estas imágenes desde ECR.
+
+## 22. Despliegue de SQL Server en EKS
+
+SQL Server se desplegó dentro del namespace `ddaa` mediante:
+
+```text
+Deployment: sqlserver
+Service: sqlserver
+PVC: sqlserver-pvc
+```
+
+El servicio de SQL Server se configuró como interno:
+
+```text
+type: ClusterIP
+port: 1433
+```
+
+Esto permite que solo los pods dentro del clúster puedan conectarse a la base de datos.
+
+### 22.1 Persistencia de datos
+
+Se definió un `PersistentVolumeClaim` para mantener los datos de SQL Server:
+
+```text
+PVC: sqlserver-pvc
+StorageClass: gp2
+Capacidad: 10Gi
+Access Mode: ReadWriteOnce
+```
+
+Estado validado:
+
+```text
+NAME            STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS
+sqlserver-pvc   Bound    pvc-40174354-6e3a-462a-bfb5-723bd74dab76   10Gi       RWO            gp2
+```
+
+Esto confirma que Kubernetes creó y vinculó correctamente el volumen persistente para SQL Server.
+
+## 23. Incidencias resueltas durante el despliegue de SQL Server
+
+Durante el despliegue de SQL Server aparecieron tres incidencias técnicas relevantes.
+
+### 23.1 PVC sin StorageClass
+
+Inicialmente el PVC quedó en estado `Pending` porque no tenía `StorageClass` asignada:
+
+```text
+no persistent volumes available for this claim and no storage class is set
+```
+
+Se revisaron las clases de almacenamiento disponibles:
+
+```text
+NAME   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE
+gp2    kubernetes.io/aws-ebs   Delete          WaitForFirstConsumer
+```
+
+Solución aplicada:
+
+```yaml
+storageClassName: gp2
+```
+
+### 23.2 Falta de Amazon EBS CSI Driver
+
+Luego de asociar `gp2`, el PVC siguió esperando al provisionador externo:
+
+```text
+Waiting for a volume to be created either by the external provisioner 'ebs.csi.aws.com'
+```
+
+Se validó que el add-on no estaba instalado inicialmente:
+
+```text
+coredns
+kube-proxy
+metrics-server
+vpc-cni
+```
+
+Se instaló el add-on administrado de EKS:
+
+```powershell
+aws eks create-addon `
+  --cluster-name ddaa-eks `
+  --addon-name aws-ebs-csi-driver `
+  --region $env:AWS_DEFAULT_REGION `
+  --resolve-conflicts OVERWRITE
+```
+
+Después de instalarlo, los pods del driver quedaron en ejecución:
+
+```text
+ebs-csi-controller-b9dccc585-b4hlr   6/6   Running
+ebs-csi-controller-b9dccc585-wb5rd   6/6   Running
+ebs-csi-node-gmnmm                   3/3   Running
+ebs-csi-node-wdjj6                   3/3   Running
+```
+
+El PVC pasó a estado `Bound`.
+
+### 23.3 Permisos de SQL Server sobre el volumen
+
+SQL Server 2022 se ejecuta como usuario no-root dentro del contenedor. Al montar el volumen persistente, el contenedor falló inicialmente con:
+
+```text
+The system directory [/.system] could not be created.
+AccessDenied
+Permission denied
+```
+
+Se corrigió el deployment agregando:
+
+```yaml
+securityContext:
+  fsGroup: 10001
+```
+
+y definiendo la variable:
+
+```yaml
+- name: HOME
+  value: "/var/opt/mssql"
+```
+
+### 23.4 Estrategia Recreate para SQL Server
+
+Durante un reinicio del deployment apareció el mensaje:
+
+```text
+Another instance of the application is already running.
+```
+
+Esto ocurrió porque Kubernetes intentó levantar un nuevo pod mientras el anterior todavía estaba cerrando y ambos competían por el mismo volumen persistente.
+
+Para evitarlo, el deployment de SQL Server se configuró con estrategia:
+
+```yaml
+strategy:
+  type: Recreate
+```
+
+Con esta estrategia, Kubernetes termina el pod anterior antes de iniciar uno nuevo, lo que resulta más apropiado para una base de datos con volumen persistente `ReadWriteOnce`.
+
+## 24. Validación de SQL Server
+
+Después de corregir las incidencias anteriores, SQL Server quedó en estado `Running`:
+
+```text
+sqlserver-649596fb4b-hbhsx   1/1   Running   0
+```
+
+Los logs confirmaron que SQL Server quedó listo para recibir conexiones:
+
+```text
+SQL Server is now ready for client connections.
+Recovery is complete.
+```
+
+## 25. Despliegue del backend ddaa-service
+
+El backend se desplegó en EKS usando la imagen publicada en ECR:
+
+```text
+409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-service:eks-v1
+```
+
+El servicio Kubernetes del backend se configuró como interno:
+
+```text
+Service: ddaa-service
+type: ClusterIP
+port: 8082
+```
+
+Estado validado:
+
+```text
+NAME                            READY   STATUS    RESTARTS
+ddaa-service-77cd77cb67-hhwjz   1/1     Running   0
+```
+
+Servicio validado:
+
+```text
+NAME           TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)
+ddaa-service   ClusterIP   172.20.228.150   <none>        8082/TCP
+```
+
+Los logs confirmaron conexión exitosa hacia SQL Server:
+
+```text
+HikariPool-1 - Start completed.
+Database JDBC URL jdbc:sqlserver://sqlserver:1433
+Default catalog/schema: ddaa/dbo
+Tomcat started on port 8082
+Started DdaaServiceApplication
+```
+
+Esto confirma que el backend se conectó correctamente a la base de datos interna mediante el nombre DNS del Service `sqlserver`.
+
+### 25.1 Validación interna del backend
+
+Se validó el health del backend desde dentro del clúster:
+
+```powershell
+kubectl run curl-test `
+  -n ddaa `
+  --rm -it `
+  --restart=Never `
+  --image=curlimages/curl `
+  -- http://ddaa-service:8082/actuator/health
+```
+
+Resultado:
+
+```json
+{"groups":["liveness","readiness"],"status":"UP"}
+```
+
+También se validó el endpoint principal:
+
+```powershell
+kubectl run curl-test `
+  -n ddaa `
+  --rm -it `
+  --restart=Never `
+  --image=curlimages/curl `
+  -- http://ddaa-service:8082/api/ddaa
+```
+
+Resultado: la API respondió correctamente con registros JSON de derechos de agua.
+
+## 26. Despliegue del frontend
+
+El frontend se desplegó en EKS usando la imagen publicada en ECR:
+
+```text
+409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-frontend:eks-v1
+```
+
+Se configuró un `ConfigMap` de Nginx para servir el frontend React/Vite y redirigir las llamadas `/api` hacia el backend interno:
+
+```text
+/api/ -> http://ddaa-service:8082/api/
+```
+
+El servicio del frontend se configuró como público:
+
+```text
+Service: frontend
+type: LoadBalancer
+port: 80
+```
+
+Estado validado:
+
+```text
+NAME                        READY   STATUS    RESTARTS
+frontend-5c8f89888f-p7lrq   1/1     Running   0
+```
+
+Servicio validado:
+
+```text
+NAME       TYPE           CLUSTER-IP     EXTERNAL-IP                                                               PORT(S)
+frontend   LoadBalancer   172.20.69.73   ae2f0d94e16c544d8a3ece7840b2a25c-1716158239.us-east-1.elb.amazonaws.com   80:32696/TCP
+```
+
+Esto confirma que AWS creó un balanceador de carga público para acceder al frontend.
+
+## 27. Validación funcional completa
+
+La arquitectura funcional validada fue:
+
+```text
+Internet
+   |
+   v
+LoadBalancer AWS
+   |
+   v
+frontend / Nginx
+   |
+   v
+/api hacia ddaa-service
+   |
+   v
+SQL Server interno con PVC
+```
+
+### 27.1 Validación pública del frontend
+
+Se validó el endpoint `/health` del frontend usando la URL pública del LoadBalancer:
+
+```powershell
+curl.exe -i "$env:FRONTEND_URL/health"
+```
+
+Resultado:
+
+```text
+HTTP/1.1 200 OK
+Server: nginx/1.27.5
+
+UP
+```
+
+### 27.2 Validación pública de la API mediante proxy del frontend
+
+Se validó el acceso público a la API mediante Nginx:
+
+```powershell
+curl.exe -i "$env:FRONTEND_URL/api/ddaa"
+```
+
+Resultado:
+
+```text
+HTTP/1.1 200
+Server: nginx/1.27.5
+Content-Type: application/json
+```
+
+La respuesta incluyó registros JSON provenientes del backend y la base de datos.
+
+### 27.3 Validación desde navegador
+
+Se abrió la URL pública del frontend:
+
+```powershell
+Start-Process $env:FRONTEND_URL
+```
+
+Desde el navegador se validó:
+
+```text
+Listado de derechos de agua: OK
+Creación de derecho de agua: OK
+Edición de derecho de agua: OK
+Eliminación de derecho de agua: OK
+```
+
+Los logs del frontend confirmaron las operaciones realizadas desde el navegador:
+
+```text
+GET /api/ddaa HTTP/1.1 200
+GET /api/ddaa/form-options HTTP/1.1 200
+GET /api/ddaa/1 HTTP/1.1 200
+POST /api/ddaa HTTP/1.1 201
+PUT /api/ddaa/5 HTTP/1.1 204
+DELETE /api/ddaa/4 HTTP/1.1 204
+```
+
+Con esto se confirma el funcionamiento completo del flujo:
+
+```text
+Frontend público -> Backend interno -> Base de datos interna
+```
+
+## 28. Estado del despliegue antes de HPA
+
+Antes de aplicar HPA, el estado del namespace `ddaa` era el siguiente:
+
+```text
+NAME                            READY   STATUS    RESTARTS   IP             NODE
+ddaa-service-77cd77cb67-hhwjz   1/1     Running   0          10.20.52.82    ip-10-20-37-208.ec2.internal
+frontend-5c8f89888f-p7lrq       1/1     Running   0          10.20.39.240   ip-10-20-37-208.ec2.internal
+sqlserver-649596fb4b-hbhsx      1/1     Running   0          10.20.19.183   ip-10-20-8-184.ec2.internal
+```
+
+Servicios:
+
+```text
+NAME           TYPE           CLUSTER-IP       EXTERNAL-IP                                                               PORT(S)
+ddaa-service   ClusterIP      172.20.228.150   <none>                                                                    8082/TCP
+frontend       LoadBalancer   172.20.69.73     ae2f0d94e16c544d8a3ece7840b2a25c-1716158239.us-east-1.elb.amazonaws.com   80:32696/TCP
+sqlserver      ClusterIP      172.20.155.196   <none>                                                                    1433/TCP
+```
+
+PVC:
+
+```text
+NAME            STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS
+sqlserver-pvc   Bound    pvc-40174354-6e3a-462a-bfb5-723bd74dab76   10Gi       RWO            gp2
+```
+
+HPA aún no estaba aplicado:
+
+```text
+No resources found in ddaa namespace.
+```
+
+## 29. Configuración de HPA
+
+Para cumplir con el requisito de autoscaling, se configuró `HorizontalPodAutoscaler` para los componentes stateless del sistema:
+
+```text
+frontend
+ddaa-service
+```
+
+No se configuró HPA para SQL Server, ya que la base de datos utiliza almacenamiento persistente mediante PVC y no corresponde escalarla horizontalmente en esta versión mínima del laboratorio.
+
+Antes de aplicar HPA se validó que `metrics-server` estuviera entregando métricas:
+
+```powershell
+kubectl top nodes
+```
+
+Resultado:
+
+```text
+NAME                           CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)
+ip-10-20-37-208.ec2.internal   32m          1%       919Mi           27%
+ip-10-20-8-184.ec2.internal    117m         6%       2854Mi          86%
+```
+
+También se validaron métricas por pod:
+
+```powershell
+kubectl top pods -n ddaa
+```
+
+Resultado:
+
+```text
+NAME                            CPU(cores)   MEMORY(bytes)
+ddaa-service-77cd77cb67-hhwjz   4m           278Mi
+frontend-5c8f89888f-p7lrq       1m           3Mi
+sqlserver-649596fb4b-hbhsx      10m          774Mi
+```
+
+Luego se aplicaron los manifiestos HPA:
+
+```powershell
+kubectl apply -f .\k8s\hpa\ddaa-service-hpa.yaml
+kubectl apply -f .\k8s\hpa\frontend-hpa.yaml
+```
+
+Resultado:
+
+```text
+horizontalpodautoscaler.autoscaling/ddaa-service-hpa created
+horizontalpodautoscaler.autoscaling/frontend-hpa created
+```
+
+Validación:
+
+```powershell
+kubectl get hpa -n ddaa
+```
+
+Resultado final:
+
+```text
+NAME               REFERENCE                 TARGETS       MINPODS   MAXPODS   REPLICAS
+ddaa-service-hpa   Deployment/ddaa-service   cpu: 1%/50%   1         3         1
+frontend-hpa       Deployment/frontend       cpu: 1%/50%   1         3         1
+```
+
+Detalle del HPA del backend:
+
+```text
+ScalingActive   True   ValidMetricFound
+Min replicas: 1
+Max replicas: 3
+Deployment pods: 1 current / 1 desired
+```
+
+Detalle del HPA del frontend:
+
+```text
+ScalingActive   True   ValidMetricFound
+Min replicas: 1
+Max replicas: 3
+Deployment pods: 1 current / 1 desired
+```
+
+Con esto se confirma que HPA quedó correctamente configurado y que Kubernetes puede calcular métricas de CPU para los deployments `frontend` y `ddaa-service`.
