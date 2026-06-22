@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ddaa-service
+  namespace: ddaa
+  labels:
+    app: ddaa-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ddaa-service
+  template:
+    metadata:
+      labels:
+        app: ddaa-service
+    spec:
+      containers:
+        - name: ddaa-service
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/ddaa-service:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8082
+
+          env:
+            - name: DDAA_DB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ddaa-config
+                  key: DDAA_DB_URL
+
+            - name: DDAA_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ddaa-secret
+                  key: DDAA_DB_USER
+
+            - name: DDAA_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ddaa-secret
+                  key: DDAA_DB_PASSWORD
+
+            - name: DDAA_JPA_DDL_AUTO
+              valueFrom:
+                configMapKeyRef:
+                  name: ddaa-config
+                  key: DDAA_JPA_DDL_AUTO
+
+            - name: DDAA_SQL_INIT_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: ddaa-config
+                  key: DDAA_SQL_INIT_MODE
+
+            - name: DDAA_SAMPLE_DATA_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: ddaa-config
+                  key: DDAA_SAMPLE_DATA_ENABLED
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "750m"
+              memory: "1Gi"

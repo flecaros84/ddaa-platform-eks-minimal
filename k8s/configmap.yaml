@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ddaa-config
+  namespace: ddaa
+data:
+  # Nombre lógico de la base de datos usada por el backend.
+  DDAA_DB_NAME: "ddaa"
+
+  # Host interno del servicio SQL Server dentro del namespace ddaa.
+  DDAA_DB_HOST: "sqlserver"
+
+  # Puerto interno de SQL Server.
+  DDAA_DB_PORT: "1433"
+
+  # URL JDBC usada por Spring Boot para conectar con SQL Server.
+  DDAA_DB_URL: "jdbc:sqlserver://sqlserver:1433;databaseName=ddaa;encrypt=true;trustServerCertificate=true"
+
+  # En despliegue inicial se permite que Hibernate actualice el esquema.
+  # Para producción real convendría usar migraciones controladas.
+  DDAA_JPA_DDL_AUTO: "update"
+
+  # Inicialización SQL. Se mantiene en never para evitar reinserciones inesperadas.
+  DDAA_SQL_INIT_MODE: "never"
+
+  # Permite cargar datos de ejemplo si el backend tiene esa lógica implementada.
+  DDAA_SAMPLE_DATA_ENABLED: "true"

@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-config
+  namespace: ddaa
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Frontend React/Vite.
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # Proxy interno hacia el backend Spring Boot.
+        # El backend NO se expone públicamente.
+        location /api/ {
+            proxy_pass http://ddaa-service:8082/api/;
+            proxy_http_version 1.1;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Health simple para validar el contenedor frontend.
+        location /health {
+            access_log off;
+            return 200 "UP\n";
+        }
+    }

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+
+  # No se incluye secret.example.yaml porque no debe usarse con credenciales reales.
+  # El Secret real se creará manualmente en el laboratorio o mediante GitHub Secrets.
+
+  - sqlserver/sqlserver-pvc.yaml
+  - sqlserver/sqlserver-deployment.yaml
+  - sqlserver/sqlserver-service.yaml
+
+  - ddaa-service/ddaa-service-deployment.yaml
+  - ddaa-service/ddaa-service-service.yaml
+
+  - frontend/frontend-nginx-configmap.yaml
+  - frontend/frontend-deployment.yaml
+  - frontend/frontend-service.yaml
+
+  # Los HPA se aplicarán después de validar Metrics Server.
+  # - hpa/ddaa-service-hpa.yaml
+  # - hpa/frontend-hpa.yaml
