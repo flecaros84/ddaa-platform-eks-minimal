@@ -1,0 +1,23 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ddaa-service-hpa
+  namespace: ddaa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ddaa-service
+
+  minReplicas: 1
+  maxReplicas: 3
+
+  # Umbral elegido para evidenciar autoscaling con carga moderada.
+  # Requiere Metrics Server instalado en el clúster.
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50

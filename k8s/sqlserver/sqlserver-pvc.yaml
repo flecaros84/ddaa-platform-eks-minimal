@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sqlserver-pvc
+  namespace: ddaa
+spec:
+  accessModes:
+    - ReadWriteOnce
+
+  # Se usa la StorageClass por defecto del clúster EKS.
+  # Si el laboratorio no trae una StorageClass por defecto, se ajustará luego.
+  resources:
+    requests:
+      storage: 10Gi
