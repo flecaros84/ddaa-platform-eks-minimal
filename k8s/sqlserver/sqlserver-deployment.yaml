@@ -7,6 +7,8 @@ metadata:
     app: sqlserver
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: sqlserver
@@ -15,28 +17,29 @@ spec:
       labels:
         app: sqlserver
     spec:
+      securityContext:
+        fsGroup: 10001
       containers:
         - name: sqlserver
           image: mcr.microsoft.com/mssql/server:2022-latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 1433
-
           env:
             - name: ACCEPT_EULA
               value: "Y"
             - name: MSSQL_PID
               value: "Developer"
+            - name: HOME
+              value: "/var/opt/mssql"
             - name: MSSQL_SA_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: ddaa-secret
                   key: MSSQL_SA_PASSWORD
-
           volumeMounts:
             - name: sqlserver-data
               mountPath: /var/opt/mssql
-
           resources:
             requests:
               cpu: "500m"
@@ -44,7 +47,6 @@ spec:
             limits:
               cpu: "1000m"
               memory: "2Gi"
-
       volumes:
         - name: sqlserver-data
           persistentVolumeClaim:

@@ -44,3 +44,6 @@ docs/Informe Infrestructura Ev.3.docx
 # Credenciales locales AWS Academy / Learner Lab
 scripts/aws-lab-env.ps1
 .env.aws
+
+# Secretos locales EKS
+scripts/eks-local-secrets.ps1

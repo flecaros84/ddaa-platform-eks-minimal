@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/ddaa-frontend:latest
+          image: 409321960537.dkr.ecr.us-east-1.amazonaws.com/ddaa-frontend:eks-v1
           imagePullPolicy: Always
 
           ports:
