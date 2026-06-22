@@ -1,0 +1,50 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  # Cluster EKS para el despliegue minimo del proyecto DDAA.
+  name: ddaa-eks
+  region: us-east-1
+  version: "1.34"
+
+availabilityZones:
+  - us-east-1c
+  - us-east-1d
+
+iam:
+  # Rol existente del AWS Academy Learner Lab.
+  serviceRoleARN: arn:aws:iam::409321960537:role/LabRole
+
+vpc:
+  # VPC nueva y dedicada para el cluster.
+  # No se usa la VPC default del laboratorio.
+  cidr: "10.20.0.0/16"
+
+  # Se deshabilita NAT para ajustarse al laboratorio AWS Academy.
+  # Los nodos worker se ubicaran en subredes publicas.
+  nat:
+    gateway: Disable
+
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+managedNodeGroups:
+  - name: ng-ddaa-public
+
+    # En clases se usa t3.medium/t3.large segun disponibilidad.
+    # Partimos con t3.medium para cuidar recursos del laboratorio.
+    instanceType: t3.medium
+
+    # Node group en subredes publicas, alineado con el laboratorio.
+    privateNetworking: false
+
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 3
+
+    volumeSize: 20
+
+    iam:
+      # Rol existente para los nodos EC2 del node group.
+      instanceRoleARN: arn:aws:iam::409321960537:role/LabRole

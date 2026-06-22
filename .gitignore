@@ -36,3 +36,11 @@ Thumbs.db
 *.tmp
 *.bak
 *.swp
+
+docs/384905570.pdf
+docs/384908524.pdf
+docs/Informe Infrestructura Ev.3.docx
+
+# Credenciales locales AWS Academy / Learner Lab
+scripts/aws-lab-env.ps1
+.env.aws
