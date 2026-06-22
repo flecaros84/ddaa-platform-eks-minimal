@@ -1,0 +1,45 @@
+server:
+  port: ${SERVER_PORT:8082}
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: ddaa-service
+
+  datasource:
+    url: ${DDAA_DB_URL:jdbc:sqlserver://localhost:1433;databaseName=ddaa;encrypt=true;trustServerCertificate=true}
+    username: ${DDAA_DB_USER:ddaa_user}
+    password: ${DDAA_DB_PASSWORD:DdaaUser2026!}
+    driver-class-name: ${DDAA_DB_DRIVER:com.microsoft.sqlserver.jdbc.SQLServerDriver}
+
+  sql:
+    init:
+      mode: ${DDAA_SQL_INIT_MODE:never}
+
+  jpa:
+    hibernate:
+      ddl-auto: ${DDAA_JPA_DDL_AUTO:update}
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    show-sql: ${DDAA_JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  sample-data:
+    enabled: ${DDAA_SAMPLE_DATA_ENABLED:true}

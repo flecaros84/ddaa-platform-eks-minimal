@@ -1,0 +1,74 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: ddaa-minimal-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-DdaaLocal2026!}
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    networks:
+      - ddaa-network
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql-tools:latest
+    container_name: ddaa-minimal-sqlserver-init
+    depends_on:
+      - sqlserver
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-DdaaLocal2026!}
+    volumes:
+      - ./database/init:/scripts:ro
+    networks:
+      - ddaa-network
+    entrypoint: >
+      /bin/bash -c '
+      echo "Esperando SQL Server...";
+      for i in {1..60}; do
+        /opt/mssql-tools/bin/sqlcmd -S sqlserver -U sa -P "$${MSSQL_SA_PASSWORD}" -Q "SELECT 1" && break;
+        sleep 2;
+      done;
+      echo "Inicializando base ddaa...";
+      /opt/mssql-tools/bin/sqlcmd -S sqlserver -U sa -P "$${MSSQL_SA_PASSWORD}" -i /scripts/01-init-ddaa.sql;
+      echo "Base inicializada.";
+      '
+
+  ddaa-service:
+    build:
+      context: ./ddaa-service
+    container_name: ddaa-minimal-service
+    depends_on:
+      sqlserver-init:
+        condition: service_completed_successfully
+    environment:
+      SERVER_PORT: 8082
+      DDAA_DB_URL: jdbc:sqlserver://sqlserver:1433;databaseName=ddaa;encrypt=true;trustServerCertificate=true
+      DDAA_DB_USER: ${DDAA_DB_USER:-ddaa_user}
+      DDAA_DB_PASSWORD: ${DDAA_DB_PASSWORD:-DdaaUser2026!}
+      DDAA_JPA_DDL_AUTO: update
+      DDAA_SAMPLE_DATA_ENABLED: "true"
+    ports:
+      - "8082:8082"
+    networks:
+      - ddaa-network
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ddaa-minimal-frontend
+    depends_on:
+      - ddaa-service
+    ports:
+      - "3000:80"
+    networks:
+      - ddaa-network
+
+volumes:
+  sqlserver-data:
+
+networks:
+  ddaa-network:
+    driver: bridge
