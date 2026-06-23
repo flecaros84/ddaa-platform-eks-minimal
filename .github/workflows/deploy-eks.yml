@@ -1,0 +1,101 @@
+name: Deploy DDAA to EKS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feature/aws-eks-deploy
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+  BACKEND_REPOSITORY: ddaa-service
+  FRONTEND_REPOSITORY: ddaa-frontend
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-push-deploy:
+    name: Build, push and deploy to EKS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar codigo fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS Academy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login en Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Construir y publicar imagen backend
+        run: |
+          BACKEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_REPOSITORY:$IMAGE_TAG"
+
+          docker build -t "$BACKEND_IMAGE" ./ddaa-service
+          docker push "$BACKEND_IMAGE"
+
+      - name: Construir y publicar imagen frontend
+        run: |
+          FRONTEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_REPOSITORY:$IMAGE_TAG"
+
+          docker build -t "$FRONTEND_IMAGE" ./frontend
+          docker push "$FRONTEND_IMAGE"
+
+      - name: Instalar kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.0
+
+      - name: Configurar kubeconfig de EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      - name: Crear o actualizar Secret de Kubernetes
+        run: |
+          kubectl create namespace ddaa --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl create secret generic ddaa-secret \
+            -n ddaa \
+            --from-literal=DDAA_DB_USER=sa \
+            --from-literal=DDAA_DB_PASSWORD="${{ secrets.DDAA_DB_PASSWORD }}" \
+            --from-literal=MSSQL_SA_PASSWORD="${{ secrets.DDAA_DB_PASSWORD }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Aplicar manifiestos Kubernetes
+        run: |
+          kubectl apply -k k8s
+
+      - name: Actualizar imagenes desplegadas
+        run: |
+          BACKEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_REPOSITORY:$IMAGE_TAG"
+          FRONTEND_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_REPOSITORY:$IMAGE_TAG"
+
+          kubectl set image deployment/ddaa-service \
+            ddaa-service="$BACKEND_IMAGE" \
+            -n ddaa
+
+          kubectl set image deployment/frontend \
+            frontend="$FRONTEND_IMAGE" \
+            -n ddaa
+
+      - name: Esperar rollout backend y frontend
+        run: |
+          kubectl rollout status deployment/ddaa-service -n ddaa --timeout=300s
+          kubectl rollout status deployment/frontend -n ddaa --timeout=300s
+
+      - name: Mostrar estado final del despliegue
+        run: |
+          kubectl get pods -n ddaa -o wide
+          kubectl get svc -n ddaa
+          kubectl get pvc -n ddaa
+          kubectl get hpa -n ddaa

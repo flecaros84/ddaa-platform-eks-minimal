@@ -20,5 +20,5 @@ resources:
   - frontend/frontend-service.yaml
 
   # Los HPA se aplicarán después de validar Metrics Server.
-  # - hpa/ddaa-service-hpa.yaml
-  # - hpa/frontend-hpa.yaml
+  - hpa/ddaa-service-hpa.yaml
+  - hpa/frontend-hpa.yaml
